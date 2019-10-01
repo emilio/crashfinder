@@ -4,19 +4,17 @@
 
 use std::path::PathBuf;
 use url::Url;
-use std::process::{Command, Stdio};
-use std::io::Read;
-use std::time::Duration;
-use wait_timeout::ChildExt;
+use std::process::Command;
+use walkdir::WalkDir;
 
 pub struct CrashtestRunner {
     content_shell: PathBuf,
 }
 
 impl CrashtestRunner {
-    pub fn new(content_shell: PathBuf) -> Self {
+    pub fn new(out_path: PathBuf) -> Self {
         Self {
-            content_shell: content_shell.canonicalize().unwrap(),
+            content_shell: out_path.canonicalize().unwrap().join("content_shell"),
         }
     }
 }
@@ -33,30 +31,58 @@ impl super::CrashtestRunner for CrashtestRunner {
             .arg("--run-web-tests")
             .arg("--single-process")
             .arg("--enable-experimental-web-platform-features")
-            .arg(url.to_string())
-            .stderr(Stdio::piped())
-            .stdout(Stdio::piped());
+            .arg(url.to_string());
 
-        let mut child = command.spawn().expect("Couldn't run content_shell");
-        let status = match child.wait_timeout(Duration::from_secs(20)).expect("Couldn't wait for child") {
-            Some(status) if status.success() => {
-                return super::CrashtestResult::Ok;
-            }
-            other => other,
-        };
+        super::run_crashtest_command(command)
+    }
+}
 
-        if status.is_none() {
-            child.kill().expect("Couldn't kill content_shell after timeout");
-        }
+pub struct CrashtestProvider {
+    walkdir: walkdir::IntoIter,
+}
 
-        let mut stderr = String::new();
-        let mut stdout = String::new();
-        child.stderr.take().unwrap().read_to_string(&mut stderr).expect("Non-utf8 stderr?");
-        child.stdout.take().unwrap().read_to_string(&mut stdout).expect("Non-utf8 stdout?");
-        if status.is_none() {
-            super::CrashtestResult::Timeout { stdout, stderr }
-        } else {
-            super::CrashtestResult::Crashed { stdout, stderr }
+impl CrashtestProvider {
+    pub fn new(chromium_src: PathBuf) -> Self {
+        let chromium_src = chromium_src.canonicalize().unwrap();
+        let web_tests = chromium_src.join("third_party").join("blink").join("web_tests");
+        let walkdir = WalkDir::new(web_tests).follow_links(true).into_iter();
+
+        Self {
+            walkdir,
         }
     }
 }
+
+impl Iterator for CrashtestProvider {
+    type Item = Url;
+
+    fn next(&mut self) -> Option<Url> {
+        loop {
+            let entry = self.walkdir.next()?.unwrap();
+            if entry.file_type().is_file() {
+                if entry.depth() == 0 {
+                    continue;
+                }
+                if let Some(stem) = entry.path().file_stem() {
+                    let stem = stem.to_string_lossy();
+                    if stem.ends_with("-expected") || stem == "README" || stem == "OWNERS" {
+                        continue;
+                    }
+                    // FIXME(emilio): Maybe too overkill? Otherwise we get ~40k
+                    // tests rather than ~2k.
+                    if !stem.contains("crash") {
+                        continue;
+                    }
+                }
+                return Some(Url::from_file_path(entry.into_path()).unwrap());
+            }
+            assert!(entry.file_type().is_dir(), "We follow symlinks so...");
+            if entry.file_name().to_str().map_or(false, |s| s == "resources" || s == "external" || s == "third_party") {
+                self.walkdir.skip_current_dir();
+                continue;
+            }
+        }
+    }
+}
+
+impl super::CrashtestProvider for CrashtestProvider {}

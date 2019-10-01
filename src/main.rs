@@ -9,12 +9,13 @@ extern crate clap;
 extern crate log;
 
 use std::path::PathBuf;
+use std::process::Command;
 use url::Url;
 
 mod gecko;
 mod blink;
 
-pub(crate) trait CrashtestProvider : std::iter::IntoIterator<Item = Url> {}
+pub(crate) trait CrashtestProvider : std::iter::Iterator<Item = Url> + Send {}
 
 pub(crate) enum CrashtestResult {
     Ok,
@@ -23,29 +24,48 @@ pub(crate) enum CrashtestResult {
     Crashed { stdout: String, stderr: String },
 }
 
-pub(crate) trait CrashtestRunner {
+pub(crate) trait CrashtestRunner : Sync {
     fn run(&self, url: &Url) -> CrashtestResult;
 }
 
 fn main() {
     let matches = app_from_crate!()
         .args_from_usage(
-            "<gecko-tree> 'Path to gecko'
-             <content-shell> 'Path to Chromium\'s content_shell'"
+            "--source <engine> 'Engine to run crashtests for'
+             --target <engine> 'Engine to run crashtests on'
+             <source-path> 'Path to the source engine's source directory'
+             <target-path> 'Path to the target engines' object directory'"
         )
         .get_matches();
 
     env_logger::init();
 
-    let gecko_tree = PathBuf::from(matches.value_of("gecko-tree").unwrap());
-    let content_shell = PathBuf::from(matches.value_of("content-shell").unwrap());
+    let source_path = PathBuf::from(matches.value_of("source-path").unwrap());
+    let target_path = PathBuf::from(matches.value_of("target-path").unwrap());
 
-    let crashtests = gecko::CrashtestProvider::new(gecko_tree);
-    let consumer = blink::CrashtestRunner::new(content_shell);
+    let crashtests = match matches.value_of("source").unwrap() {
+        "gecko" => Box::new(gecko::CrashtestProvider::new(source_path)) as Box<dyn CrashtestProvider>,
+        "blink" => Box::new(blink::CrashtestProvider::new(source_path)) as Box<dyn CrashtestProvider>,
+        // FIXME(emilio): implement webkit stuff.
+        engine => panic!("Unimplemented source engine {}, use: gecko, blink", engine),
+    };
+
+    let consumer = match matches.value_of("target").unwrap() {
+        "gecko" => Box::new(gecko::CrashtestRunner::new(target_path)) as Box<dyn CrashtestRunner>,
+        "blink" => Box::new(blink::CrashtestRunner::new(target_path)) as Box<dyn CrashtestRunner>,
+        // FIXME(emilio): implement webkit stuff.
+        engine => panic!("Unimplemented target engine {}, use: gecko, blink", engine),
+    };
+
+    const LIST: bool = false;
 
     rayon::scope(|scope| {
         let consumer = &consumer;
         for c in crashtests {
+            if LIST {
+                println!("{}", c);
+                continue;
+            }
             scope.spawn(move |_| {
                 let c = c;
                 match consumer.run(&c) {
@@ -57,4 +77,35 @@ fn main() {
             })
         }
     });
+}
+
+fn run_crashtest_command(mut command: Command) -> CrashtestResult {
+    use std::io::Read;
+    use std::time::Duration;
+    use wait_timeout::ChildExt;
+    use std::process::Stdio;
+
+    command.stderr(Stdio::piped()).stdout(Stdio::piped());
+
+    let mut child = command.spawn().expect("Couldn't run");
+    let status = match child.wait_timeout(Duration::from_secs(20)).expect("Couldn't wait for child") {
+        Some(status) if status.success() => {
+            return CrashtestResult::Ok;
+        }
+        other => other,
+    };
+
+    if status.is_none() {
+        child.kill().expect("Couldn't kill after timeout");
+    }
+
+    let mut stderr = String::new();
+    let mut stdout = String::new();
+    child.stderr.take().unwrap().read_to_string(&mut stderr).expect("Non-utf8 stderr?");
+    child.stdout.take().unwrap().read_to_string(&mut stdout).expect("Non-utf8 stdout?");
+    if status.is_none() {
+        CrashtestResult::Timeout { stdout, stderr }
+    } else {
+        CrashtestResult::Crashed { stdout, stderr }
+    }
 }

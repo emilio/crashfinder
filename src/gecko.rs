@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Lines};
 use url::Url;
+use std::process::Command;
 
 pub struct CrashtestList {
     /// Path to crashtests.list
@@ -107,13 +108,52 @@ impl CrashtestProvider {
     }
 }
 
-impl IntoIterator for CrashtestProvider {
+impl Iterator for CrashtestProvider {
     type Item = Url;
-    type IntoIter = CrashtestList;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.root_list
+    fn next(&mut self) -> Option<Url> {
+        self.root_list.next()
     }
 }
 
 impl super::CrashtestProvider for CrashtestProvider {}
+
+pub struct CrashtestRunner {
+    objdir: PathBuf,
+}
+
+impl CrashtestRunner {
+    pub fn new(objdir: PathBuf) -> Self {
+        Self {
+            objdir: objdir.canonicalize().unwrap(),
+        }
+    }
+}
+
+impl super::CrashtestRunner for CrashtestRunner {
+    fn run(&self, url: &Url) -> super::CrashtestResult {
+        if url.scheme() != "file" {
+            return super::CrashtestResult::Skipped;
+        }
+
+        let tempdir = tempdir::TempDir::new("firefox-crashtest")
+            .expect("couldn't create temporary profile directory");
+
+        let firefox = self.objdir.join("dist").join("bin").join("firefox");
+
+        let mut command = Command::new(&firefox);
+
+        command.env("MOZ_GDB_SLEEP", "0");
+        command.env("MOZ_HEADLESS", "1");
+
+        command
+            .arg("-layoutdebug")
+            .arg(url.to_string())
+            .arg("-autoclose")
+            .arg("-no-remote")
+            .arg("-profile")
+            .arg(tempdir.path());
+
+        super::run_crashtest_command(command)
+    }
+}
