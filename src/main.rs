@@ -14,6 +14,7 @@ use url::Url;
 
 mod gecko;
 mod blink;
+mod webkit;
 
 pub(crate) trait CrashtestProvider : std::iter::Iterator<Item = Url> + Send {}
 
@@ -53,8 +54,8 @@ fn main() {
     let consumer = match matches.value_of("target").unwrap() {
         "gecko" => Box::new(gecko::CrashtestRunner::new(target_path)) as Box<dyn CrashtestRunner>,
         "blink" => Box::new(blink::CrashtestRunner::new(target_path)) as Box<dyn CrashtestRunner>,
-        // FIXME(emilio): implement webkit stuff.
-        engine => panic!("Unimplemented target engine {}, use: gecko, blink", engine),
+        "webkit" => Box::new(webkit::CrashtestRunner::new(target_path)) as Box<dyn CrashtestRunner>,
+        engine => panic!("Unimplemented target engine {}, use: gecko, blink, webkit", engine),
     };
 
     const LIST: bool = false;

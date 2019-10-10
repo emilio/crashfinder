@@ -100,7 +100,6 @@ impl CrashtestProvider {
         let crashtests_list = gecko_root.join("testing").join("crashtest").join("crashtests.list");
         let crashtests_list = crashtests_list.canonicalize().unwrap();
         Self {
-            // gecko_root: gecko_root.clone(),
             root_list: CrashtestList::new(
                 Url::from_file_path(crashtests_list).unwrap()
             ),
