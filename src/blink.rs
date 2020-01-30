@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use std::path::PathBuf;
-use url::Url;
 use std::process::Command;
+use url::Url;
 use walkdir::WalkDir;
 
 pub struct CrashtestRunner {
@@ -47,9 +47,7 @@ impl CrashtestProvider {
         let web_tests = chromium_src.join("third_party").join("blink").join("web_tests");
         let walkdir = WalkDir::new(web_tests).follow_links(true).into_iter();
 
-        Self {
-            walkdir,
-        }
+        Self { walkdir }
     }
 }
 

@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use std::path::PathBuf;
-use url::Url;
 use std::process::Command;
+use url::Url;
 
 pub struct CrashtestRunner {
     test_runner: PathBuf,

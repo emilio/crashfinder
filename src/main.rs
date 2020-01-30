@@ -12,11 +12,11 @@ use std::path::PathBuf;
 use std::process::Command;
 use url::Url;
 
-mod gecko;
 mod blink;
+mod gecko;
 mod webkit;
 
-pub(crate) trait CrashtestProvider : std::iter::Iterator<Item = Url> + Send {}
+pub(crate) trait CrashtestProvider: std::iter::Iterator<Item = Url> + Send {}
 
 pub(crate) enum CrashtestResult {
     Ok,
@@ -25,7 +25,7 @@ pub(crate) enum CrashtestResult {
     Crashed { stdout: String, stderr: String },
 }
 
-pub(crate) trait CrashtestRunner : Sync {
+pub(crate) trait CrashtestRunner: Sync {
     fn run(&self, url: &Url) -> CrashtestResult;
 }
 
@@ -35,7 +35,7 @@ fn main() {
             "--source <engine> 'Engine to run crashtests for'
              --target <engine> 'Engine to run crashtests on'
              <source-path> 'Path to the source engine's source directory'
-             <target-path> 'Path to the target engines' object directory'"
+             <target-path> 'Path to the target engines' object directory'",
         )
         .get_matches();
 
@@ -45,8 +45,12 @@ fn main() {
     let target_path = PathBuf::from(matches.value_of("target-path").unwrap());
 
     let crashtests = match matches.value_of("source").unwrap() {
-        "gecko" => Box::new(gecko::CrashtestProvider::new(source_path)) as Box<dyn CrashtestProvider>,
-        "blink" => Box::new(blink::CrashtestProvider::new(source_path)) as Box<dyn CrashtestProvider>,
+        "gecko" => {
+            Box::new(gecko::CrashtestProvider::new(source_path)) as Box<dyn CrashtestProvider>
+        }
+        "blink" => {
+            Box::new(blink::CrashtestProvider::new(source_path)) as Box<dyn CrashtestProvider>
+        }
         // FIXME(emilio): implement webkit stuff.
         engine => panic!("Unimplemented source engine {}, use: gecko, blink", engine),
     };
@@ -71,7 +75,7 @@ fn main() {
                 let c = c;
                 match consumer.run(&c) {
                     CrashtestResult::Ok => println!("OK: {}", c),
-                    CrashtestResult::Timeout { .. }=> println!("TIMEOUT: {}", c),
+                    CrashtestResult::Timeout { .. } => println!("TIMEOUT: {}", c),
                     CrashtestResult::Skipped => println!("SKIP: {}", c),
                     CrashtestResult::Crashed { .. } => println!("CRASHED: {}", c),
                 }
@@ -82,9 +86,9 @@ fn main() {
 
 fn run_crashtest_command(mut command: Command) -> CrashtestResult {
     use std::io::Read;
+    use std::process::Stdio;
     use std::time::Duration;
     use wait_timeout::ChildExt;
-    use std::process::Stdio;
 
     command.stderr(Stdio::piped()).stdout(Stdio::piped());
 
